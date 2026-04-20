@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Pixel Bullet Runner</title>
+
+<style>
+body { margin:0; overflow:hidden; background:black; }
+
+canvas{
+ position:absolute;
+ top:0;
+ left:0;
+ pointer-events:none;
+}
+
+#menu{
+ position:absolute;
+ width:100%;
+ height:100%;
+ display:flex;
+ justify-content:center;
+ align-items:center;
+ flex-direction:column;
+ color:white;
+ font-family:monospace;
+ z-index:10;
+}
+
+#ui{
+ position:absolute;
+ left:10px;
+ top:10px;
+ color:white;
+ display:none;
+ z-index:10;
+}
+
+button{
+ font-size:26px;
+ padding:12px 40px;
+ cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div id="menu">
+<h1>Pixel Bullet Runner</h1>
+<button id="playBtn">▶ PLAY</button>
+</div>
+
+<canvas id="bg"></canvas>
+<canvas id="game"></canvas>
+
+<div id="ui">
+Score:<span id="score">0</span>
+LV:<span id="level">1</span>
+HP:<span id="hp">10</span>
+</div>
+
+<script>
+
+// ===== 音 =====
+const s_jump = new Audio("https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg");
+const s_hit  = new Audio("https://actions.google.com/sounds/v1/cartoon/punch.ogg");
+const s_heal = new Audio("https://actions.google.com/sounds/v1/cartoon/pop.ogg");
+const s_laser= new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+
+// ===== 基本 =====
+const menu = document.getElementById("menu");
+const ui = document.getElementById("ui");
+const playBtn = document.getElementById("playBtn");
+
+const scoreEl = document.getElementById("score");
+const levelEl = document.getElementById("level");
+const hpEl = document.getElementById("hp");
+
+const bg=document.getElementById("bg");
+const b=bg.getContext("2d");
+const c=document.getElementById("game");
+const ctx=c.getContext("2d");
+
+bg.width=c.width=innerWidth;
+bg.height=c.height=innerHeight;
+
+// 入力
+let keys={};
+onkeydown=e=>keys[e.code]=true;
+onkeyup=e=>keys[e.code]=false;
+
+// 状態
+let running=false;
+let p,redBig,redSmall,followers,lasers,heals,sakura,bossBalls;
+let score,level,hp,inv,flash;
+let spawn,laserT,levelT;
+let boss=false,bossT=0,clear=false;
+
+// START
+playBtn.onclick=()=>{
+ menu.style.display="none";
+ ui.style.display="block";
+ reset();
+ running=true;
+};
+
+// RESET
+function reset(){
+ p={x:100,y:c.height-40,vy:0,j:0};
+
+ redBig=[]; redSmall=[]; followers=[];
+ lasers=[]; heals=[]; sakura=[]; bossBalls=[];
+
+ score=0; level=1; hp=10; inv=0; flash=0;
+ spawn=0; laserT=0;
+
+ levelT=60;
+ boss=false; bossT=0; clear=false;
+}
+
+// ステージ
+function stage(){
+ if(level<20) return "field";
+ if(level<40) return "sea";
+ if(level<60) return "sakura";
+ if(level<80) return "lava";
+ return "castle";
+}
+
+// 背景
+function drawBG(){
+ let s=stage();
+ if(s==="field") b.fillStyle="#66cc66";
+ if(s==="sea") b.fillStyle="#2a6cff";
+ if(s==="sakura") b.fillStyle="#0b0f2a";
+ if(s==="lava") b.fillStyle="#330000";
+ if(s==="castle") b.fillStyle="#111";
+ b.fillRect(0,0,c.width,c.height);
+}
+
+// 桜
+function spawnSakura(){
+ if(stage()!=="sakura") return;
+ if(Math.random()<0.2){
+  sakura.push({x:Math.random()*c.width,y:-10,vy:2});
+ }
+}
+
+function drawSakura(){
+ sakura.forEach((s,i)=>{
+  s.y+=s.vy;
+  ctx.fillStyle="pink";
+  ctx.fillRect(s.x,s.y,4,4);
+  if(s.y>c.height) sakura.splice(i,1);
+ });
+}
+
+// プレイヤー
+function drawP(){
+ ctx.fillStyle="#222";
+ ctx.fillRect(p.x,p.y,30,30);
+ ctx.fillStyle="white";
+ ctx.fillRect(p.x+5,p.y+8,5,5);
+ ctx.fillRect(p.x+20,p.y+8,5,5);
+}
+
+function maxJump(){
+ return level>=70?3:2;
+}
+
+// 当たり
+function hit(e){
+ return p.x<e.x+e.w&&p.x+30>e.x&&p.y<e.y+e.h&&p.y+30>e.y;
+}
+
+// ダメージ
+function dmg(){
+ if(inv<=0){
+  hp--;
+  hpEl.textContent=hp;
+  inv=20;
+  flash=10;
+  s_hit.currentTime=0; s_hit.play();
+  if(hp<=0){
+   alert("GAME OVER");
+   location.reload();
+  }
+ }
+}
+
+// メイン
+function loop(){
+requestAnimationFrame(loop);
+if(!running) return;
+
+ctx.clearRect(0,0,c.width,c.height);
+drawBG();
+
+if(clear){
+ ctx.fillStyle="yellow";
+ ctx.font="60px monospace";
+ ctx.fillText("CLEAR!",c.width/2-120,c.height/2);
+ return;
+}
+
+// ボス開始
+if(level>=100&&!boss){
+ boss=true;
+ redBig=[]; redSmall=[]; followers=[]; lasers=[];
+}
+
+// 移動
+if(level>=5){
+ if(keys["ArrowRight"]) p.x+=5;
+ if(keys["ArrowLeft"]) p.x-=5;
+}
+
+// ジャンプ
+if(keys["Space"]&&p.j<maxJump()){
+ p.vy=-12;
+ p.j++;
+ s_jump.currentTime=0; s_jump.play();
+ keys["Space"]=false;
+}
+
+p.vy+=0.7;
+p.y+=p.vy;
+
+if(p.y>c.height-40){
+ p.y=c.height-40;
+ p.j=0;
+ p.vy=0;
+}
+
+drawP();
+spawnSakura();
+drawSakura();
+
+// ===== 通常 =====
+if(!boss){
+
+ spawn++;
+
+ if(spawn>100){
+
+  if(level<60){
+   if(Math.random()<0.3){
+    redBig.push({x:c.width,y:c.height-40,w:30,h:30,vx:-2});
+   }
+   if(Math.random()<0.2){
+    redSmall.push({x:c.width,y:c.height-80,w:8,h:8,vx:-4});
+   }
+  }
+
+  if(level>=20 && Math.random()<0.25){
+   followers.push({x:Math.random()*c.width,y:0,w:14,h:14});
+  }
+
+  if(Math.random()<0.08){
+   heals.push({x:c.width,y:c.height-140,w:14,h:14,vx:-3});
+  }
+
+  spawn=0;
+ }
+
+ // レーザー
+ if(level>=50 && level!==60){
+  laserT++;
+  if(laserT>120){
+   let count= level>=60?7:1;
+   for(let i=0;i<count;i++){
+    lasers.push({x:Math.random()*c.width,t:0});
+   }
+   s_laser.currentTime=0; s_laser.play();
+   laserT=0;
+  }
+ }
+
+}else{
+
+ // ===== ボス：黄色反射球 =====
+ bossT++;
+
+ if(bossT%60===0){
+  let angle=Math.random()*Math.PI*2;
+  bossBalls.push({
+   x:c.width/2,
+   y:c.height/2,
+   vx:Math.cos(angle)*4,
+   vy:Math.sin(angle)*4,
+   w:14,h:14
+  });
+ }
+
+ if(bossT>130*60) clear=true;
+}
+
+// ===== 描画 =====
+
+// 赤大
+redBig.forEach(e=>{
+ e.x+=e.vx;
+ ctx.fillStyle="red";
+ ctx.fillRect(e.x,e.y,e.w,e.h);
+ if(hit(e)) dmg();
+});
+
+// 赤小
+redSmall.forEach(e=>{
+ e.x+=e.vx;
+ ctx.fillStyle="darkred";
+ ctx.fillRect(e.x,e.y,e.w,e.h);
+ if(hit(e)) dmg();
+});
+
+// 追尾
+followers.forEach(f=>{
+ f.x+=(p.x<f.x?-1:1);
+ f.y+=1;
+ ctx.fillStyle="orange";
+ ctx.fillRect(f.x,f.y,f.w,f.h);
+ if(hit(f)) dmg();
+});
+
+// 回復
+heals.forEach((h,i)=>{
+ h.x+=h.vx;
+ ctx.fillStyle="lime";
+ ctx.fillRect(h.x,h.y,h.w,h.h);
+ ctx.strokeStyle="white";
+ ctx.strokeRect(h.x-2,h.y-2,h.w+4,h.h+4);
+ if(hit(h)){
+  hp=Math.min(10,hp+1);
+  hpEl.textContent=hp;
+  s_heal.currentTime=0; s_heal.play();
+  heals.splice(i,1);
+ }
+});
+
+// レーザー
+lasers.forEach(l=>{
+ l.t+=1.5;
+ if(l.t<60){
+  ctx.fillStyle="white";
+  ctx.fillRect(l.x,0,2,c.height);
+ }else if(l.t<120){
+  ctx.fillStyle="red";
+  ctx.fillRect(l.x-12,0,24,c.height);
+  if(p.x<l.x+12&&p.x+30>l.x-12) dmg();
+ }
+});
+
+// ボス球
+bossBalls.forEach(b=>{
+ b.x+=b.vx;
+ b.y+=b.vy;
+
+ if(b.x<0||b.x>c.width) b.vx*=-1;
+ if(b.y<0||b.y>c.height) b.vy*=-1;
+
+ ctx.fillStyle="yellow";
+ ctx.beginPath();
+ ctx.arc(b.x,b.y,7,0,Math.PI*2);
+ ctx.fill();
+
+ if(hit(b)) dmg();
+});
+
+// ===== LV =====
+score++;
+let newLv=Math.floor(score/300)+1;
+
+if(newLv!==level && newLv%5===0){
+ levelT=60;
+}
+
+level=newLv;
+
+scoreEl.textContent=score;
+levelEl.textContent=level;
+
+if(levelT>0){
+ ctx.fillStyle="white";
+ ctx.font="40px monospace";
+ ctx.fillText("LV "+level,c.width/2-60,c.height/2);
+ levelT--;
+}
+
+// フラッシュ
+if(flash>0){
+ ctx.fillStyle="rgba(255,0,0,0.3)";
+ ctx.fillRect(0,0,c.width,c.height);
+ flash--;
+}
+
+if(inv>0) inv--;
+}
+
+loop();
+
+</script>
+</body>
+</html>
